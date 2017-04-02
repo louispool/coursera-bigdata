@@ -1,10 +1,11 @@
 package stackoverflow
 
-import org.apache.spark.SparkConf
-import org.apache.spark.SparkContext
+import org.apache.spark.{HashPartitioner, RangePartitioner, SparkConf, SparkContext}
 import org.apache.spark.SparkContext._
 import org.apache.spark.rdd.RDD
+
 import annotation.tailrec
+import scala.collection.immutable.Stream.Empty
 import scala.reflect.ClassTag
 
 /** A raw stackoverflow posting, either a question or an answer */
@@ -20,16 +21,20 @@ object StackOverflow extends StackOverflow {
   /** Main function */
   def main(args: Array[String]): Unit = {
 
+    val timeStart = System.currentTimeMillis()
+
     val lines   = sc.textFile("src/main/resources/stackoverflow/stackoverflow.csv")
     val raw     = rawPostings(lines)
     val grouped = groupedPostings(raw)
     val scored  = scoredPostings(grouped)
     val vectors = vectorPostings(scored)
-//    assert(vectors.count() == 2121822, "Incorrect number of vectors: " + vectors.count())
+    //assert(vectors.count() == 2121822, "Incorrect number of vectors: " + vectors.count())
 
     val means   = kmeans(sampleVectors(vectors), vectors, debug = true)
     val results = clusterResults(means, vectors)
     printResults(results)
+
+    println("Time taken " + (System.currentTimeMillis() - timeStart) / 60000.0 + " min")
   }
 }
 
@@ -76,9 +81,20 @@ class StackOverflow extends Serializable {
     })
 
 
-  /** Group the questions and answers together */
+  /**
+   * Group the questions and answers together
+   *
+   * Accepts an RDD of Posts (Questions and Answers) and returns a Pair RDD of Question Ids mapped to a list of (Question, Answer) posts.
+   */
   def groupedPostings(postings: RDD[Posting]): RDD[(Int, Iterable[(Posting, Posting)])] = {
-    ???
+
+    val questions = postings.filter(p => p.postingType == 1).map(p => (p.id, p))
+    val answers   = postings.filter(p => p.postingType == 2).map(p => (p.parentId.get, p))
+
+    //val partitioner = new RangePartitioner(16, questions) //  HashPartitioner(100)
+
+    //questions.join(answers).groupByKey().partitionBy(partitioner).persist
+    questions.join(answers).groupByKey()
   }
 
 
@@ -96,8 +112,7 @@ class StackOverflow extends Serializable {
           }
       highScore
     }
-
-    ???
+    grouped.values.map(l => (l.head._1, answerHighScore(l.unzip._2.toArray)))
   }
 
 
@@ -116,8 +131,7 @@ class StackOverflow extends Serializable {
         }
       }
     }
-
-    ???
+    scored.map(t => (firstLangInTag(t._1.tags, langs).get*langSpread, t._2)).cache()
   }
 
 
@@ -172,9 +186,18 @@ class StackOverflow extends Serializable {
 
   /** Main kmeans computation */
   @tailrec final def kmeans(means: Array[(Int, Int)], vectors: RDD[(Int, Int)], iter: Int = 1, debug: Boolean = false): Array[(Int, Int)] = {
-    val newMeans = means.clone() // you need to compute newMeans
 
-    // TODO: Fill in the newMeans array
+    //Associate each vector with the mean that is closest to it
+    val clusters = vectors.groupBy(v => findClosest(v, means)).collectAsMap()
+
+    //Update each mean with the average value of its cluster
+    val newMeans = means.clone()
+    for (i <- means.indices) {
+      val cluster = clusters.getOrElse(i, Empty)
+      if (cluster.nonEmpty)
+        newMeans(i) = averageVectors(cluster)
+    }
+
     val distance = euclideanDistance(means, newMeans)
 
     if (debug) {
@@ -273,10 +296,19 @@ class StackOverflow extends Serializable {
     val closestGrouped = closest.groupByKey()
 
     val median = closestGrouped.mapValues { vs =>
-      val langLabel: String   = ??? // most common language in the cluster
-      val langPercent: Double = ??? // percent of the questions in the most common language
-      val clusterSize: Int    = ???
-      val medianScore: Int    = ???
+      val dominantLang = vs.groupBy(_._1).maxBy(_._2.size)
+
+      val langLabel: String   = langs(dominantLang._1 / langSpread) // most common language in the cluster
+      val langPercent: Double = (dominantLang._2.size / vs.size.toDouble) * 100 // percent of the questions in the most common language
+      val clusterSize: Int    = vs.size
+      val medianScore: Int    = {
+        val sortedArr = dominantLang._2.unzip._2.toArray.sorted // median of the scores of the dominant language, not the cluster
+        val idx = sortedArr.length / 2
+        if (sortedArr.length % 2 == 1)
+          sortedArr(idx)
+        else
+          (sortedArr(idx) + sortedArr(idx-1)) / 2
+      }
 
       (langLabel, langPercent, clusterSize, medianScore)
     }
