@@ -37,7 +37,7 @@ object TimeUsage {
     val finalDfWithSql = timeUsageGroupedSql(summaryDf)
     finalDfWithSql.show()
 
-    val summaryDfTyped = timeUsageSummaryTyped(initDf)
+    val summaryDfTyped = timeUsageSummaryTyped(summaryDf)
     val finalDfTyped = timeUsageGroupedTyped(summaryDfTyped)
     finalDfTyped.show()
   }
@@ -192,6 +192,43 @@ object TimeUsage {
                                                            "GROUP BY working, sex, age " +
                                                            "ORDER BY working, sex, age"
 
+//  /**
+//   * @return A `Dataset[TimeUsageRow]` from the “untyped” `DataFrame`
+//   * @param timeUsageInitDf  Initial `DataFrame` returned by read method
+//   *
+//   *                           Hint: you should use the `getAs` method of `Row` to look up columns and
+//   *                           cast them at the same time.
+//   */
+//  def timeUsageSummaryTyped(timeUsageInitDf: DataFrame): Dataset[TimeUsageRow] = {
+//
+//    def startsWith(colName: String, prefixes: String*) = prefixes.exists(prefix => colName.startsWith(prefix))
+//
+//    val columnNames = timeUsageSummaryDf.columns
+//
+//    val primaryColNames = columnNames.collect({ case colName if startsWith(colName, "t01", "t03", "t11", "t1801", "t1803") => colName })
+//    val workingColNames = columnNames.collect({ case colName if startsWith(colName, "t05", "t1805") => colName })
+//    val otherColNames = columnNames.collect({ case colName if startsWith(colName, "t02", "t04", "t06", "t07", "t08", "t09", "t10",
+//                                                                         "t12", "t13", "t14", "t15", "t16", "t18") &&
+//                                                              !startsWith(colName, "t1801", "t1803", "t1805") => colName
+//    })
+//
+//    timeUsageSummaryDf.map(row => {
+//
+//      val primaryNeeds = primaryColNames.map(colName => row.getAs[Double](colName)).sum / 60.0
+//      val work = workingColNames.map(colName => row.getAs[Double](colName)).sum / 60.0
+//      val other = otherColNames.map(colName => row.getAs[Double](colName)).sum / 60.0
+//
+//      val telfs = row.getAs[Double]("telfs")
+//      val tesex = row.getAs[Double]("tesex")
+//      val teage = row.getAs[Double]("teage")
+//
+//      TimeUsageRow(if (telfs >= 1 && telfs < 3) "working" else "not working",
+//                   if (tesex == 1) "male" else "female",
+//                   if (teage >= 15 && teage <= 22) "young" else if (teage >= 23 && teage <= 55) "active" else "elder",
+//                   primaryNeeds, work, other)
+//    })
+//  }
+
   /**
     * @return A `Dataset[TimeUsageRow]` from the “untyped” `DataFrame`
     * @param timeUsageSummaryDf `DataFrame` returned by the `timeUsageSummary` method
@@ -199,35 +236,8 @@ object TimeUsage {
     * Hint: you should use the `getAs` method of `Row` to look up columns and
     * cast them at the same time.
     */
-  def timeUsageSummaryTyped(timeUsageSummaryDf: DataFrame): Dataset[TimeUsageRow] = {
-
-    def startsWith(colName: String, prefixes: String*) = prefixes.exists(prefix => colName.startsWith(prefix))
-
-    val columnNames = timeUsageSummaryDf.columns
-
-    val primaryColNames = columnNames.collect({ case colName if startsWith(colName, "t01", "t03", "t11", "t1801", "t1803") => colName })
-    val workingColNames = columnNames.collect({ case colName if startsWith(colName, "t05", "t1805") => colName })
-    val otherColNames   = columnNames.collect({ case colName if startsWith(colName, "t02", "t04", "t06", "t07", "t08", "t09", "t10",
-                                                                                    "t12", "t13", "t14", "t15", "t16", "t18") &&
-                                                               !startsWith(colName, "t1801", "t1803", "t1805") => colName })
-
-    timeUsageSummaryDf.map(row => {
-
-      val primaryNeeds = primaryColNames.map(colName => row.getAs[Double](colName)).sum / 60.0
-      val work = workingColNames.map(colName => row.getAs[Double](colName)).sum / 60.0
-      val other = otherColNames.map(colName => row.getAs[Double](colName)).sum / 60.0
-
-      val telfs = row.getAs[Double]("telfs")
-      val tesex = row.getAs[Double]("tesex")
-      val teage = row.getAs[Double]("teage")
-
-
-      TimeUsageRow(if (telfs >= 1 && telfs < 3) "working" else "not working",
-                   if (tesex == 1) "male" else "female",
-                   if (teage >= 15 && teage <= 22) "young" else if (teage >= 23 && teage <= 55) "active" else "elder",
-                   primaryNeeds, work, other)
-    })
-  }
+  def timeUsageSummaryTyped(timeUsageSummaryDf: DataFrame): Dataset[TimeUsageRow] =
+    timeUsageSummaryDf.map(row => TimeUsageRow(row.getAs[String]("working"), row.getAs[String]("sex"), row.getAs[String]("age"), row.getAs[Double]("primaryNeeds"), row.getAs[Double]("work"), row.getAs[Double]("other")))
 
   /**
     * @return Same as `timeUsageGrouped`, but using the typed API when possible
